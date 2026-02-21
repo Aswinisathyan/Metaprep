@@ -1,0 +1,6 @@
+id,text_description,image_filename,label
+1,   This is a product  description with extra spaces.   ,img_01.jpg,Electronics
+2,"ALERTTT!!!!! HIGH QUALITY DATA NEEDED!!!!!!!!!",img_02.jpg,Urgent
+3,,img_03.jpg,Missing
+4,"   Unfinished sentence with,, no end",,Incomplete
+5,"Repeated symbols #### and @@@@ are here",img_04.jpg,Noise
