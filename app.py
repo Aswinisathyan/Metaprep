@@ -2,11 +2,9 @@ import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
 import numpy as np
-import time
 import os
 import zipfile
 import tempfile
-from datetime import datetime
 
 from src.profiling import profile_text_dataset, profile_images
 from src.dqi import DataQualityIndex
@@ -24,7 +22,7 @@ st.set_page_config(
 )
 
 # =====================================
-# ANIMATED STYLE
+# STYLE
 # =====================================
 st.markdown("""
 <style>
@@ -38,14 +36,6 @@ st.markdown("""
     50%{background-position:100% 50%}
     100%{background-position:0% 50%}
 }
-.neon-box{
-    background:rgba(0,255,255,0.05);
-    border:1px solid #00F5FF;
-    border-radius:15px;
-    padding:25px;
-    box-shadow:0 0 25px #00F5FF55;
-    margin-bottom:20px;
-}
 </style>
 """, unsafe_allow_html=True)
 
@@ -55,12 +45,9 @@ st.divider()
 # =====================================
 # SESSION STATE
 # =====================================
-for key in ["dataset","image_folder","processed","strategy","confidence","logs"]:
+for key in ["dataset","image_folder","processed","strategy","confidence"]:
     if key not in st.session_state:
         st.session_state[key] = None
-
-if st.session_state.logs is None:
-    st.session_state.logs = []
 
 # =====================================
 # TABS
@@ -94,12 +81,16 @@ with tab1:
         image_folder = None
 
         for root, dirs, files in os.walk(temp_dir):
+
             for file in files:
                 if file.endswith(".csv"):
                     csv_file = os.path.join(root, file)
 
+                if file.lower().endswith((".jpg",".jpeg",".png")):
+                    image_folder = root
+
             for d in dirs:
-                if d.lower() == "images":
+                if d.lower() in ["images","image","imgs","pictures"]:
                     image_folder = os.path.join(root, d)
 
         if csv_file:
@@ -123,11 +114,7 @@ with tab2:
         if st.session_state.image_folder:
             image_profile = profile_images(st.session_state.image_folder)
         else:
-            image_profile = {
-                "blur_score":1.0,
-                "noise_score":1.0,
-                "resolution_score":1.0
-            }
+            image_profile = {"blur_score":1.0,"noise_score":1.0,"resolution_score":1.0}
 
         metrics = DataQualityIndex(text_profile, image_profile).compute_dqi()
 
@@ -142,7 +129,11 @@ with tab2:
         if TQ < 0.90:
             strategy["Advanced Text Cleaning"] = True
         if IQ < 0.80:
-            strategy["GAN Image Enhancement"] = True
+            strategy["OpenCV Image Enhancement"] = True
+
+        # Numeric strategy trigger
+        if len(st.session_state.dataset.select_dtypes(include=np.number).columns) > 0:
+            strategy["Numeric Processing"] = True
 
         if not strategy:
             strategy["Dataset Quality Satisfactory"] = True
@@ -160,67 +151,75 @@ with tab2:
 # =====================================
 # TAB 3 – EXECUTION
 # =====================================
-with tab3:
+if st.button("🚀 Execute Pipeline"):
 
-    if st.session_state.strategy:
+    df = st.session_state.dataset.copy()
+    logs = []
 
-        if st.button("🚀 Execute Agents"):
+    # -----------------------------
+    # PRINT STRATEGY ENGINE OUTPUT
+    # -----------------------------
+    logs.append("🔍 Strategy Engine Output")
+    logs.append(f"Confidence: {st.session_state.confidence}")
+    logs.append("Selected Actions:")
 
-            df = st.session_state.dataset.copy()
-            logs = []
+    for action in st.session_state.strategy:
+        logs.append(f" - {action}")
 
-            for step in st.session_state.strategy:
+    logs.append("-----------------------------------")
 
-                # -------------------------
-                # TEXT AGENT
-                # -------------------------
-                if step == "Remove Duplicates":
-                    df = df.drop_duplicates()
-                    logs.append("✔ Duplicates Removed")
+    # -----------------------------
+    # EXECUTE STEPS
+    # -----------------------------
+    for step in st.session_state.strategy:
 
-                if step == "Fill Missing":
-                    df = df.fillna("")
-                    logs.append("✔ Missing Values Filled")
+        if step == "Remove Duplicates":
+            df = df.drop_duplicates()
+            logs.append("✔ Duplicates Removed")
 
-                if step == "Advanced Text Cleaning":
-                    df = clean_text_dataset(df)
-                    logs.append("✔ Text Normalization Applied")
+        if step == "Fill Missing":
+            df = df.fillna("")
+            logs.append("✔ Missing Values Filled")
 
-                # -------------------------
-                # IMAGE ENHANCEMENT AGENT
-                # -------------------------
-                if step == "Image Enhancement":
+        if step == "Advanced Text Cleaning":
+            df = clean_text_dataset(df)
+            logs.append("✔ Text Normalization Applied")
 
-                    if st.session_state.image_folder:
+        if step == "Numeric Processing":
+            df, pipeline_used, nq_score = numeric_agent(df)
 
-                        result = enhance_images(
-                            st.session_state.image_folder,
-                            os.path.join(
-                                st.session_state.image_folder,
-                                "enhanced"
-                            )
-                        )
+            logs.append("📊 Numeric Agent Output")
+            logs.append(f"Pipeline Selected: {pipeline_used}")
+            logs.append(f"Numeric Quality Score: {nq_score}")
+            logs.append("-----------------------------------")
 
-                        if result["status"] == "success":
-                            st.session_state.image_folder = result["enhanced_folder"]
+        if step == "OpenCV Image Enhancement":
 
-                            logs.append(
-                                f"✔ Image Enhanced | IQ Improvement: {result['improvement']}"
-                            )
-                        else:
-                            logs.append("⚠ Image Enhancement Failed")
-                        if step == "Numeric Processing":
+            if st.session_state.image_folder:
 
-                            df, pipeline_used, nq_score = numeric_agent(df)
-                            logs.append(f"✔ Numeric Agent Applied | Pipeline: {pipeline_used} | NQ: {nq_score}")
+                result = enhance_images(
+                    st.session_state.image_folder,
+                    os.path.join(st.session_state.image_folder,"enhanced")
+                )
 
-            st.session_state.processed = df
-            st.dataframe(st.session_state.processed)
-            st.success("Pipeline Execution Complete")
+                if result["status"] == "success":
 
-            for log in logs:
-                st.write(log)
+                    st.session_state.image_folder = result["enhanced_folder"]
 
+                    logs.append("🖼 Image Agent Output")
+                    logs.append(f"IQ Before: {result['IQ_before']}")
+                    logs.append(f"IQ After: {result['IQ_after']}")
+                    logs.append(f"Improvement: {result['improvement']}")
+                    logs.append("-----------------------------------")
+
+    st.session_state.processed = df
+    st.success("Pipeline Execution Complete")
+
+    st.markdown("### 🧠 Model Output Console")
+    for log in logs:
+        st.write(log)
+
+    st.dataframe(df)
 # =====================================
 # TAB 4 – ANALYTICS
 # =====================================
@@ -234,31 +233,65 @@ with tab4:
         text_before = profile_text_dataset(df_before)
         text_after = profile_text_dataset(df_after)
 
-        image_profile = profile_images(st.session_state.image_folder)
+        if st.session_state.image_folder:
+            image_profile = profile_images(st.session_state.image_folder)
+        else:
+            image_profile = {"blur_score":1.0,"noise_score":1.0,"resolution_score":1.0}
 
         dqi_before = DataQualityIndex(text_before,image_profile).compute_dqi()
         dqi_after = DataQualityIndex(text_after,image_profile).compute_dqi()
 
-        improvement = round(dqi_after["DQI"] - dqi_before["DQI"],3)
+        # -----------------------------
+        # METRICS DISPLAY
+        # -----------------------------
+        col1, col2, col3 = st.columns(3)
 
-        st.metric("DQI Before", dqi_before["DQI"])
-        st.metric("DQI After", dqi_after["DQI"])
-        st.metric("Improvement", improvement)
+        col1.metric("TQ Before → After", 
+                    f"{dqi_before['TQ']} → {dqi_after['TQ']}")
+        col2.metric("IQ Before → After", 
+                    f"{dqi_before['IQ']} → {dqi_after['IQ']}")
+        col3.metric("DQI Before → After", 
+                    f"{dqi_before['DQI']} → {dqi_after['DQI']}")
 
-        categories=["C","S","TQ","IQ"]
+        # -----------------------------
+        # BAR CHART (ONLY TQ, IQ, DQI)
+        # -----------------------------
+        categories = ["TQ", "IQ", "DQI"]
 
-        fig=go.Figure()
-        fig.add_trace(go.Scatterpolar(
-            r=[dqi_before["C"],dqi_before["S"],dqi_before["TQ"],dqi_before["IQ"]],
-            theta=categories,
-            fill='toself',
-            name="Before"
+        before_values = [
+            dqi_before["TQ"],
+            dqi_before["IQ"],
+            dqi_before["DQI"]
+        ]
+
+        after_values = [
+            dqi_after["TQ"],
+            dqi_after["IQ"],
+            dqi_after["DQI"]
+        ]
+
+        fig = go.Figure()
+
+        fig.add_trace(go.Bar(
+            x=categories,
+            y=before_values,
+            name="Before",
+            opacity=0.7
         ))
-        fig.add_trace(go.Scatterpolar(
-            r=[dqi_after["C"],dqi_after["S"],dqi_after["TQ"],dqi_after["IQ"]],
-            theta=categories,
-            fill='toself',
-            name="After"
+
+        fig.add_trace(go.Bar(
+            x=categories,
+            y=after_values,
+            name="After",
+            opacity=0.7
         ))
 
-        st.plotly_chart(fig)
+        fig.update_layout(
+            title="Quality Improvement (TQ, IQ, DQI)",
+            barmode="group",
+            yaxis=dict(range=[0,1]),
+            xaxis_title="Metric",
+            yaxis_title="Score"
+        )
+
+        st.plotly_chart(fig, use_container_width=True)

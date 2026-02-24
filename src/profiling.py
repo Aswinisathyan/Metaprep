@@ -123,7 +123,14 @@ def profile_text_dataset(df: pd.DataFrame):
 # ======================================================
 # IMAGE PROFILING
 # ======================================================
+def profile_images(image_folder):
 
+    if image_folder is None or not os.path.exists(image_folder):
+        return {
+            "blur_score": 1.0,
+            "noise_score": 1.0,
+            "resolution_score": 1.0
+        }
 def estimate_blur(image):
     gray = cv2.cvtColor(np.array(image), cv2.COLOR_BGR2GRAY)
     return cv2.Laplacian(gray, cv2.CV_64F).var()
