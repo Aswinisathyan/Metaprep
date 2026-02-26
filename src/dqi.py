@@ -1,17 +1,19 @@
-# dqi.py
-
 class DataQualityIndex:
     """
     Computes multi-dimensional Data Quality Index (DQI)
     for multimodal datasets (Text + Image).
+
+    - Automatically adapts to modality presence
+    - Dynamically normalizes weights
+    - Prevents artificial inflation from missing modalities
     """
 
-    def __init__(self, text_profile: dict, image_profile: dict):
-        self.text_profile = text_profile
-        self.image_profile = image_profile
+    def __init__(self, text_profile: dict, image_profile: dict = None):
+        self.text_profile = text_profile or {}
+        self.image_profile = image_profile or {}
 
-        # Default weights (can be tuned)
-        self.weights = {
+        # Base weights (used if modality present)
+        self.base_weights = {
             "C": 0.30,     # Completeness
             "S": 0.20,     # Consistency
             "TQ": 0.25,    # Text Quality
@@ -23,13 +25,11 @@ class DataQualityIndex:
     # ----------------------------------
     def compute_text_quality(self):
 
-        # Individual sub-scores (expected normalized 0-1)
         P = self.text_profile.get("punctuation_score", 1.0)
         R = self.text_profile.get("repetition_score", 1.0)
         E = self.text_profile.get("extraneous_char_score", 1.0)
         L = self.text_profile.get("length_stability_score", 1.0)
 
-        # Composite Text Quality
         TQ = (0.30 * P) + (0.30 * R) + (0.20 * E) + (0.20 * L)
 
         return round(min(max(TQ, 0), 1), 3)
@@ -39,11 +39,23 @@ class DataQualityIndex:
     # ----------------------------------
     def compute_image_quality(self):
 
-        blur_score = self.image_profile.get("blur_score", 1.0)
-        noise_score = self.image_profile.get("noise_score", 1.0)
-        resolution_score = self.image_profile.get("resolution_score", 1.0)
+        blur_score = self.image_profile.get("blur_score")
+        noise_score = self.image_profile.get("noise_score")
+        resolution_score = self.image_profile.get("resolution_score")
 
-        IQ = (0.40 * blur_score) + (0.30 * noise_score) + (0.30 * resolution_score)
+        # If no real image metrics exist → return None
+        if blur_score is None and noise_score is None and resolution_score is None:
+            return None
+
+        blur_score = blur_score if blur_score is not None else 1.0
+        noise_score = noise_score if noise_score is not None else 1.0
+        resolution_score = resolution_score if resolution_score is not None else 1.0
+
+        IQ = (
+            0.40 * blur_score +
+            0.30 * noise_score +
+            0.30 * resolution_score
+        )
 
         return round(min(max(IQ, 0), 1), 3)
 
@@ -58,18 +70,40 @@ class DataQualityIndex:
         TQ = self.compute_text_quality()
         IQ = self.compute_image_quality()
 
-        DQI = (
-            self.weights["C"] * C +
-            self.weights["S"] * S +
-            self.weights["TQ"] * TQ +
-            self.weights["IQ"] * IQ
+        metrics = {
+            "C": C,
+            "S": S,
+            "TQ": TQ
+        }
+
+        # Include IQ only if available
+        if IQ is not None:
+            metrics["IQ"] = IQ
+
+        # Select active weights
+        active_weights = {
+            k: self.base_weights[k]
+            for k in metrics.keys()
+        }
+
+        # Normalize weights dynamically
+        weight_sum = sum(active_weights.values())
+        normalized_weights = {
+            k: v / weight_sum
+            for k, v in active_weights.items()
+        }
+
+        # Weighted sum
+        DQI = sum(
+            normalized_weights[k] * metrics[k]
+            for k in metrics
         )
 
         return {
             "C": round(C, 3),
             "S": round(S, 3),
             "TQ": TQ,
-            "IQ": IQ,
+            "IQ": round(IQ, 3) if IQ is not None else None,
             "DQI": round(min(max(DQI, 0), 1), 3)
         }
 

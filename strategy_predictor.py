@@ -22,3 +22,60 @@ class StrategyPredictor:
             }
 
         return predictions
+    
+
+
+
+
+    # -----------------------------
+    # EXECUTE STEPS
+    # -----------------------------
+    for step in st.session_state.strategy:
+
+        if step == "Remove Duplicates":
+            df = df.drop_duplicates()
+            logs.append("✔ Duplicates Removed")
+
+        if step == "Fill Missing":
+            df = df.fillna("")
+            logs.append("✔ Missing Values Filled")
+
+        if step == "Advanced Text Cleaning":
+            df = clean_text_dataset(df)
+            logs.append("✔ Text Normalization Applied")
+
+        if step == "Numeric Processing":
+            df, pipeline_used, nq_score = numeric_agent(df)
+
+            logs.append("📊 Numeric Agent Output")
+            logs.append(f"Pipeline Selected: {pipeline_used}")
+            logs.append(f"Numeric Quality Score: {nq_score}")
+            logs.append("-----------------------------------")
+
+        if step == "OpenCV Image Enhancement":
+
+            if st.session_state.image_folder:
+
+                result = enhance_images(
+                    st.session_state.image_folder,
+                    os.path.join(st.session_state.image_folder,"enhanced")
+                )
+
+                if result["status"] == "success":
+
+                    st.session_state.image_folder = result["enhanced_folder"]
+
+                    logs.append("🖼 Image Agent Output")
+                    logs.append(f"IQ Before: {result['IQ_before']}")
+                    logs.append(f"IQ After: {result['IQ_after']}")
+                    logs.append(f"Improvement: {result['improvement']}")
+                    logs.append("-----------------------------------")
+
+    st.session_state.processed = df
+    st.success("Pipeline Execution Complete")
+
+    st.markdown("### 🧠 Model Output Console")
+    for log in logs:
+        st.write(log)
+
+    st.dataframe(df)
