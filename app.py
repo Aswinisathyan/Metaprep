@@ -97,7 +97,6 @@ with tab1:
             for file in files:
                 if file.endswith(".csv"):
                     csv_file = os.path.join(root, file)
-
                 if file.lower().endswith((".jpg",".jpeg",".png")):
                     image_folder = root
 
@@ -109,10 +108,16 @@ with tab1:
             df = safe_read_csv(csv_file)
 
             if df is not None:
+                # RESET OLD STATE
                 st.session_state.dataset = df
                 st.session_state.image_folder = image_folder
+                st.session_state.processed = None
+                st.session_state.strategy = None
+                st.session_state.confidence = None
+
                 st.success("ZIP Extracted Successfully")
-                st.dataframe(df.head(50))
+                st.write("Total Rows:", len(df))
+                st.dataframe(df)
         else:
             st.error("No CSV file found inside ZIP.")
 
@@ -132,42 +137,42 @@ with tab2:
 
         metrics = DataQualityIndex(text_profile, image_profile).compute_dqi()
 
-        C,S,TQ,IQ = metrics["C"],metrics["S"],metrics["TQ"],metrics["IQ"]
+        C = metrics["C"]
+        S = metrics["S"]
+        TQ = metrics["TQ"]
+        IQ = metrics["IQ"]
 
-        strategy = {}
-
-        # Rule-based triggers
-        if C < 0.90:
-            strategy["Fill Missing"] = True
-        if S < 0.95:
-            strategy["Remove Duplicates"] = True
-        if TQ < 0.90:
-            strategy["Advanced Text Cleaning"] = True
-        if IQ < 0.80:
-            strategy["OpenCV Image Enhancement"] = True
-
-        if len(st.session_state.dataset.select_dtypes(include=np.number).columns) > 0:
-            strategy["Numeric Processing"] = True
-
-        # Confidence Calculation
+        # -----------------------------
+        # Confidence Calculation (Internal Only)
+        # -----------------------------
         ideal = np.array([1,1,1,1])
         actual = np.array([C,S,TQ,IQ])
-        confidence = round(1 - np.mean(np.abs(ideal-actual)),2)
+        confidence = round(1 - np.mean(np.abs(ideal - actual)), 2)
 
-        # CONFIDENCE OVERRIDE (>= 94%)
+        # -----------------------------
+        # 4 FIXED PIPELINES
+        # -----------------------------
         if confidence >= 0.94:
-            strategy = {"Dataset Quality Satisfactory": True}
+            predicted_pipeline = "Pipeline 1 – No Preprocessing Required"
 
-        if not strategy:
-            strategy["Dataset Quality Satisfactory"] = True
+        elif 0.90 <= confidence < 0.94:
+            predicted_pipeline = "Pipeline 2 – Basic Cleaning"
 
-        st.session_state.strategy = strategy
+        elif 0.80 <= confidence < 0.90:
+            predicted_pipeline = "Pipeline 3 – Moderate Cleaning"
+
+        else:
+            predicted_pipeline = "Pipeline 4 – Aggressive Multimodal Cleaning"
+
+        # Store internally
+        st.session_state.strategy = predicted_pipeline
         st.session_state.confidence = confidence
 
-        st.metric("Strategy Confidence", f"{confidence*100:.1f}%")
-        st.json(strategy)
+        # ✅ Only show predicted strategy (clean UI)
+        st.success(f"Predicted Strategy: {predicted_pipeline}")
 
-# =====================================
+
+        
 # TAB 3 – EXECUTION
 # =====================================
 with tab3:
@@ -181,64 +186,65 @@ with tab3:
             df = st.session_state.dataset.copy()
             logs = []
 
-            logs.append("🔍 Strategy Engine Output")
+            logs.append("🔍 Strategy Prediction")
             logs.append(f"Confidence: {st.session_state.confidence}")
-            logs.append("Selected Actions:")
-
-            for action in st.session_state.strategy:
-                logs.append(f" - {action}")
-
+            logs.append(f"Selected Pipeline: {st.session_state.strategy}")
             logs.append("-----------------------------------")
 
-            for step in st.session_state.strategy:
+            pipeline = st.session_state.strategy
 
-                if step == "Dataset Quality Satisfactory":
-                    logs.append("✔ Dataset already high quality. No preprocessing required.")
+            # -----------------------------
+            # PIPELINE EXECUTION
+            # -----------------------------
+            if pipeline == "Pipeline 1 – No Preprocessing Required":
+                logs.append("✔ Dataset already high quality.")
 
-                if step == "Remove Duplicates":
-                    df = df.drop_duplicates()
-                    logs.append("✔ Duplicates Removed")
+            elif pipeline == "Pipeline 2 – Basic Cleaning":
+                df = df.drop_duplicates()
+                df = df.fillna("")
+                logs.append("✔ Basic Cleaning Applied")
 
-                if step == "Fill Missing":
-                    df = df.fillna("")
-                    logs.append("✔ Missing Values Filled")
+            elif pipeline == "Pipeline 3 – Moderate Cleaning":
+                df = df.drop_duplicates()
+                df = df.fillna("")
+                df = clean_text_dataset(df)
+                logs.append("✔ Moderate Cleaning Applied")
 
-                if step == "Advanced Text Cleaning":
-                    df = clean_text_dataset(df)
-                    logs.append("✔ Text Normalization Applied")
+            elif pipeline == "Pipeline 4 – Aggressive Multimodal Cleaning":
+                df = df.drop_duplicates()
+                df = df.fillna("")
+                df = clean_text_dataset(df)
 
-                if step == "Numeric Processing":
+                if len(df.select_dtypes(include=np.number).columns) > 0:
                     df, pipeline_used, nq_score = numeric_agent(df)
-                    logs.append(f"✔ Numeric Processing: {pipeline_used}")
+                    logs.append(f"✔ Numeric Processing Applied: {pipeline_used}")
 
-                if step == "OpenCV Image Enhancement":
-                    if st.session_state.image_folder:
-                        result = enhance_images(
-                            st.session_state.image_folder,
-                            os.path.join(st.session_state.image_folder,"enhanced")
-                        )
-                        if result["status"] == "success":
-                            logs.append("✔ Image Enhancement Applied")
+                if st.session_state.image_folder:
+                    result = enhance_images(
+                        st.session_state.image_folder,
+                        os.path.join(st.session_state.image_folder,"enhanced")
+                    )
+                    logs.append("✔ Image Enhancement Applied")
+
+                logs.append("✔ Aggressive Multimodal Cleaning Completed")
 
             st.session_state.processed = df
+
             st.success("Pipeline Execution Complete")
 
-            st.markdown("### 🧠 Model Output Console")
+            st.markdown("### 🧠 Execution Console")
             for log in logs:
                 st.write(log)
 
             st.dataframe(df.head(50))
 
-            # CSV Download
             csv = df.to_csv(index=False).encode("utf-8")
-
             st.download_button(
                 label="⬇ Download Processed CSV",
                 data=csv,
                 file_name="processed_dataset.csv",
                 mime="text/csv"
             )
-
 # =====================================
 # TAB 4 – ANALYTICS
 # =====================================
